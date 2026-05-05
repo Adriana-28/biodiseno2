@@ -1,0 +1,220 @@
+bar hires · PY
+Copiar
+
+"""
+grabar_hires.py
+Video H264 (lores) + frames PNG alta resolucion (main 3280x2464)
+"""
+ 
+import sys
+import time
+import shutil
+import argparse
+from datetime import datetime
+from pathlib import Path
+ 
+# ── Verificar dependencias antes de importar ──────────────────────────────────
+ 
+def verificar_entorno():
+    errores = []
+ 
+    try:
+        import cv2
+        print(f"[OK] opencv  {cv2.__version__}")
+    except ImportError:
+        errores.append("opencv-python   ->  pip install opencv-python")
+ 
+    try:
+        import numpy as np
+        print(f"[OK] numpy   {np.__version__}")
+    except ImportError:
+        errores.append("numpy           ->  pip install numpy")
+ 
+    try:
+        from picamera2 import Picamera2
+        camaras = Picamera2.global_camera_info()
+        if not camaras:
+            errores.append("Camara no detectada. Revisa el cable o corre: sudo raspi-config")
+        else:
+            print(f"[OK] picamera2  camara={camaras[0].get('Model','?')}")
+    except ImportError:
+        errores.append("picamera2       ->  sudo apt install python3-picamera2")
+    except Exception as e:
+        errores.append(f"picamera2 error: {e}")
+ 
+    if not shutil.which("ffmpeg"):
+        errores.append("ffmpeg          ->  sudo apt install ffmpeg")
+    else:
+        print("[OK] ffmpeg")
+ 
+    if errores:
+        print("\n[ERROR] Falta lo siguiente:")
+        for e in errores:
+            print(f"       {e}")
+        print()
+        sys.exit(1)
+ 
+    print("[OK] Entorno listo\n")
+ 
+ 
+# ── Imports reales (solo si entorno OK) ───────────────────────────────────────
+ 
+verificar_entorno()
+ 
+import cv2
+import numpy as np
+from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder, Quality
+from picamera2.outputs import FfmpegOutput
+ 
+ 
+# ── Calidad de imagen ─────────────────────────────────────────────────────────
+ 
+def nitidez_ok(frame_rgb, umbral=80.0):
+    gris  = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2GRAY)
+    valor = cv2.Laplacian(gris, cv2.CV_64F).var()
+    return valor >= umbral, round(valor, 1)
+ 
+def exposicion_ok(frame_rgb, min_b=40.0, max_b=215.0):
+    brillo = float(frame_rgb.mean())
+    return min_b <= brillo <= max_b, round(brillo, 1)
+ 
+ 
+# ── Camara ────────────────────────────────────────────────────────────────────
+ 
+def crear_camara(res_video):
+    print(f"[...] Configurando camara  main=3280x2464  lores={res_video[0]}x{res_video[1]}")
+    cam = Picamera2()
+    config = cam.create_video_configuration(
+        main  = {"size": (3280, 2464), "format": "RGB888"},
+        lores = {"size": res_video,    "format": "YUV420"},
+    )
+    cam.configure(config)
+    print("[OK] Camara configurada")
+    return cam
+ 
+ 
+# ── Captura con reintentos ────────────────────────────────────────────────────
+ 
+def capturar_frame(cam, dir_frames, ts, n, umbral_nitidez, max_intentos=4):
+    for intento in range(max_intentos):
+        frame = cam.capture_array("main")
+        ok_n, var   = nitidez_ok(frame, umbral_nitidez)
+        ok_b, brillo = exposicion_ok(frame)
+ 
+        if ok_n and ok_b:
+            ruta = f"{dir_frames}/frame_{ts}_{n:05d}.png"
+            bgr  = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(ruta, bgr, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+            print(f"  [FRAME {n:04d}] guardado  nitidez={var}  brillo={brillo}  -> {ruta}")
+            return True
+ 
+        motivos = []
+        if not ok_n: motivos.append(f"borroso({var})")
+        if not ok_b: motivos.append(f"exposicion({brillo})")
+        print(f"  [FRAME {n:04d}] intento {intento+1}: {', '.join(motivos)} reintentando...")
+        time.sleep(0.3)
+ 
+    print(f"  [FRAME {n:04d}] DESCARTADO tras {max_intentos} intentos")
+    return False
+ 
+ 
+# ── Principal ─────────────────────────────────────────────────────────────────
+ 
+def grabar(duracion=30, res_video=(1920,1080),
+           intervalo_frames=1.0, base_dir="capturas",
+           umbral_nitidez=80.0):
+ 
+    dir_videos = Path(base_dir) / "videos"
+    dir_frames = Path(base_dir) / "frames"
+    dir_videos.mkdir(parents=True, exist_ok=True)
+    dir_frames.mkdir(parents=True, exist_ok=True)
+    print(f"[OK] Carpetas: {dir_videos}  |  {dir_frames}")
+ 
+    ts          = datetime.now().strftime("%Y%m%d_%H%M%S")
+    video_path  = str(dir_videos / f"video_{ts}.mp4")
+ 
+    print(f"\n{'='*55}")
+    print(f"  Sesion    : {ts}")
+    print(f"  Video     : {video_path}")
+    print(f"  Frames    : cada {intervalo_frames}s  durante {duracion}s")
+    print(f"{'='*55}\n")
+ 
+    cam = crear_camara(res_video)
+ 
+    print(f"[...] Iniciando grabacion -> {video_path}")
+    cam.start_recording(H264Encoder(), FfmpegOutput(video_path), quality=Quality.HIGH)
+    print("[OK] Grabacion iniciada")
+ 
+    print("[...] Estabilizando exposicion (2s)...")
+    time.sleep(2.0)
+    print("[OK] Listo — capturando frames\n")
+ 
+    inicio    = time.time()
+    proximo   = inicio + intervalo_frames
+    count     = 0
+    frames_ok = 0
+ 
+    try:
+        while True:
+            ahora = time.time()
+ 
+            if ahora >= proximo:
+                ok = capturar_frame(cam, str(dir_frames), ts, count,
+                                    umbral_nitidez)
+                count += 1
+                if ok:
+                    frames_ok += 1
+                proximo += intervalo_frames
+ 
+            if duracion > 0 and (ahora - inicio) >= duracion:
+                print("\n[OK] Duracion completada")
+                break
+ 
+            time.sleep(0.02)
+ 
+    except KeyboardInterrupt:
+        print("\n[OK] Detenido con Ctrl+C")
+ 
+    finally:
+        cam.stop_recording()
+        elapsed = time.time() - inicio
+        print(f"\n{'='*55}")
+        print(f"  Frames capturados : {frames_ok} / {count}")
+        print(f"  Duracion real     : {elapsed:.1f}s")
+        print(f"  Video             : {video_path}")
+        print(f"  Frames en         : {dir_frames}/")
+        print(f"{'='*55}\n")
+ 
+ 
+# ── CLI ───────────────────────────────────────────────────────────────────────
+ 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Graba video H264 + frames PNG de alta resolucion."
+    )
+    parser.add_argument("--duracion",  type=int,   default=30,
+                        help="Duracion en segundos (default 30)")
+    parser.add_argument("--ancho",     type=int,   default=1920,
+                        help="Ancho video (default 1920)")
+    parser.add_argument("--alto",      type=int,   default=1080,
+                        help="Alto video (default 1080)")
+    parser.add_argument("--intervalo", type=float, default=1.0,
+                        help="Segundos entre frames (default 1.0)")
+    parser.add_argument("--salida",    type=str,   default="capturas",
+                        help="Carpeta de salida (default capturas/)")
+    parser.add_argument("--nitidez",   type=float, default=80.0,
+                        help="Umbral nitidez Laplaciano (default 80)")
+ 
+    args = parser.parse_args()
+ 
+    print(f"[...] Argumentos recibidos: {vars(args)}\n")
+ 
+    grabar(
+        duracion         = args.duracion,
+        res_video        = (args.ancho, args.alto),
+        intervalo_frames = args.intervalo,
+        base_dir         = args.salida,
+        umbral_nitidez   = args.nitidez,
+    )
+ 
