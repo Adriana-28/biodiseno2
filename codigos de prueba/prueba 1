@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+import time
+import os
+from datetime import datetime
+from pathlib import Path
+from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder, Quality
+from picamera2.outputs import FfmpegOutput
+
+
+def grabar(duracion=30, resolucion=(1920, 1080), intervalo_frames=1.0, base_dir="capturas"):
+    Path(f"{base_dir}/videos").mkdir(parents=True, exist_ok=True)
+    Path(f"{base_dir}/frames").mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    picam2 = Picamera2()
+    picam2.configure(picam2.create_video_configuration(main={"size": resolucion}))
+
+    video_path = f"{base_dir}/videos/video_{ts}.mp4"
+    picam2.start_recording(H264Encoder(), FfmpegOutput(video_path), quality=Quality.HIGH)
+
+    inicio = time.time()
+    proximo = inicio + intervalo_frames
+    count = 0
+
+    try:
+        while True:
+            ahora = time.time()
+            if ahora >= proximo:
+                picam2.capture_file(f"{base_dir}/frames/frame_{ts}_{count:05d}.jpg")
+                count += 1
+                proximo += intervalo_frames
+            if duracion > 0 and (ahora - inicio) >= duracion:
+                break
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        picam2.stop_recording()
+
+
+if _name_ == "_main_":
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("--duracion",  type=int,   default=30)
+    p.add_argument("--ancho",     type=int,   default=1920)
+    p.add_argument("--alto",      type=int,   default=1080)
+    p.add_argument("--intervalo", type=float, default=1.0)
+    p.add_argument("--salida",    type=str,   default="capturas")
+    args = p.parse_args()
+
+    grabar(args.duracion, (args.ancho, args.alto), args.intervalo, args.salida)
