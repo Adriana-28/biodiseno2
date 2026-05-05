@@ -209,43 +209,6 @@ def _nail_features(rgb: np.ndarray) -> np.ndarray | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Estimación de white_ref global de palma
-# ═══════════════════════════════════════════════════════════════════════════
-
-def estimate_global_palm_white_ref(
-    palmas_dir: Path,
-    df: pd.DataFrame,
-    sample_n: int = 30,
-) -> list[float]:
-    refs = []
-    sample = df.sample(min(sample_n, len(df)), random_state=42)
-    print(f"[INFO] Estimando ref. blanca palma ({len(sample)} videos)...")
-
-    for _, row in sample.iterrows():
-        vid = _find_file(palmas_dir, str(row["id_paciente"]), VIDEO_EXTENSIONS)
-        if vid is None:
-            continue
-        try:
-            result = extract_best_palm_frame(vid)
-            if result is None:
-                continue
-            frame_rgb, bbox, _, _method = result
-            roi = get_palm_roi_from_frame(frame_rgb, bbox)
-            ref = detect_white_reference_from_roi(roi)
-            if ref is not None:
-                refs.append(ref)
-        except Exception as e:
-            print(f"  [WARN] {vid.name}: {e}")
-
-    if refs:
-        wr = list(np.median(refs, axis=0).round(1))
-        print(f"[INFO] Ref. blanca palma global: {wr}")
-        return wr
-    print(f"[WARN] Usando ref. blanca por defecto: {WHITE_REF_PALM_DEFAULT}")
-    return WHITE_REF_PALM_DEFAULT
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 #  Extracción batch
 # ═══════════════════════════════════════════════════════════════════════════
 
