@@ -1,30 +1,3 @@
-"""
-train_metadata1_combined.py — Entrena UN modelo unificado de Hb usando
-features de uña + features de palma + Sexo.
-
-Dataset esperado:
-  Entrenamiento/
-    metadata1.csv          ← columnas: ID/id_paciente, Hemoglobina/Hb, Sexo/Sex, UNAS
-    unas/                  ← imágenes  IDXXX.jpg  (o .png)
-    Palmas/                ← videos    IDXXX.mp4  (o .mov, .avi…)
-
-Salida:
-  hb_model_combined.pkl   ← bundle con modelo + white_refs + metadata
-
-Uso:
-  python train_metadata1_combined.py
-  python train_metadata1_combined.py --model gbr --folds 5
-  python train_metadata1_combined.py \\
-      --data_dir Entrenamiento \\
-      --unas_subdir unas \\
-      --palmas_subdir Palmas \\
-      --output hb_model_combined.pkl
-
-Modos disponibles (--mode):
-  combined   ← uña + palma + Sexo   [DEFAULT]
-  unas_only  ← solo uña + Sexo      (útil si no hay video)
-  palma_only ← solo palma + Sexo    (útil si no hay imagen de uña)
-"""
 from __future__ import annotations
 
 import argparse
