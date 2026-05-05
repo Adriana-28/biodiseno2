@@ -1,0 +1,98 @@
+import cv2
+import numpy as np
+from picamera2 import Picamera2
+ 
+# ── Parametros de tu setup ────────────────────────────────────────────────────
+DISTANCIA_CM   = 15          # distancia camara → mano
+RESOLUCION     = (1920, 1080) # la que usas en tu codigo actual
+ 
+# Tamaños anatomicos aproximados niño 3-5 años
+UNIA_CM        = (1.0, 0.8)  # ancho x alto
+PALMA_CM       = (6.0, 7.0)
+ 
+# Pi Camera V2 — campo visual (FoV)
+FOV_H_DEG = 62.2
+FOV_V_DEG = 48.8
+ 
+# ── Calculo ───────────────────────────────────────────────────────────────────
+import math
+ 
+fov_h_rad = math.radians(FOV_H_DEG)
+fov_v_rad = math.radians(FOV_V_DEG)
+ 
+# Campo real en cm a la distancia dada
+campo_h_cm = 2 * DISTANCIA_CM * math.tan(fov_h_rad / 2)
+campo_v_cm = 2 * DISTANCIA_CM * math.tan(fov_v_rad / 2)
+ 
+# Pixeles por cm
+px_por_cm_h = RESOLUCION[0] / campo_h_cm
+px_por_cm_v = RESOLUCION[1] / campo_v_cm
+ 
+def pixeles_region(ancho_cm, alto_cm):
+    px_w = int(ancho_cm * px_por_cm_h)
+    px_h = int(alto_cm  * px_por_cm_v)
+    return px_w, px_h
+ 
+px_unia  = pixeles_region(*UNIA_CM)
+px_palma = pixeles_region(*PALMA_CM)
+ 
+print()
+print("=" * 55)
+print(f"  Camara      : Pi Camera V2  @ {DISTANCIA_CM} cm")
+print(f"  Resolucion  : {RESOLUCION[0]} x {RESOLUCION[1]} px  (tu config actual)")
+print("=" * 55)
+print(f"  Campo visual: {campo_h_cm:.1f} cm x {campo_v_cm:.1f} cm")
+print(f"  Densidad    : {px_por_cm_h:.0f} px/cm (H)  {px_por_cm_v:.0f} px/cm (V)")
+print("-" * 55)
+print(f"  UNIA   ({UNIA_CM[0]}x{UNIA_CM[1]} cm)  →  {px_unia[0]} x {px_unia[1]} px  "
+      f"= {px_unia[0]*px_unia[1]:,} px²")
+print(f"  PALMA  ({PALMA_CM[0]}x{PALMA_CM[1]} cm)  →  {px_palma[0]} x {px_palma[1]} px  "
+      f"= {px_palma[0]*px_palma[1]:,} px²")
+ 
+if px_unia[0] < 150:
+    print()
+    print("  ATENCION: la uña tiene menos de 150 px de ancho.")
+    print("  Para analisis CIELAB se recomienda >= 150 px.")
+    print("  Usa grabar_hires.py con stream dual para 181 x 145 px.")
+else:
+    print()
+    print("  OK: resolucion suficiente para analisis CIELAB.")
+print("=" * 55)
+ 
+# ── Captura un frame real y dibuja los ROI ────────────────────────────────────
+print("\nCapturando frame de prueba...")
+ 
+picam2 = Picamera2()
+picam2.configure(picam2.create_video_configuration(main={"size": RESOLUCION}))
+picam2.start()
+ 
+import time
+time.sleep(2)  # warm-up
+ 
+frame = picam2.capture_array()
+picam2.stop()
+ 
+# Centro de la imagen
+cx, cy = RESOLUCION[0] // 2, RESOLUCION[1] // 2
+ 
+# Dibuja rectangulo de la palma (centrado)
+px, py = px_palma
+x1_p = cx - px // 2;  y1_p = cy - py // 2
+x2_p = cx + px // 2;  y2_p = cy + py // 2
+cv2.rectangle(frame, (x1_p, y1_p), (x2_p, y2_p), (0, 255, 0), 2)
+cv2.putText(frame, f"Palma {px}x{py}px", (x1_p + 4, y1_p - 8),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+ 
+# Dibuja rectangulo de la uña (arriba centrado, simulando dedo medio)
+ux, uy = px_unia
+xu1 = cx - ux // 2;  yu1 = cy - py // 2 - uy - 10
+xu2 = cx + ux // 2;  yu2 = yu1 + uy
+cv2.rectangle(frame, (xu1, yu1), (xu2, yu2), (0, 100, 255), 2)
+cv2.putText(frame, f"Unia {ux}x{uy}px", (xu1 + 4, yu1 - 6),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 100, 255), 1)
+ 
+# Guarda el frame con los ROI marcados
+out = "resolucion_test.jpg"
+cv2.imwrite(out, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+print(f"Frame guardado: {out}")
+print("Abre la imagen para ver los ROI marcados sobre tu mano.\n")
